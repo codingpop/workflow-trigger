@@ -236,7 +236,6 @@ func TestWorkflowServerError(t *testing.T) {
 	defer server.Close()
 
 	baseURL := strings.Replace(server.URL, "https://", "", 1)
-	expected := "server error"
 
 	t.Run("TestTriggerServerError", func(t *testing.T) {
 		p := workflow.Params{
@@ -251,11 +250,7 @@ func TestWorkflowServerError(t *testing.T) {
 		got := w.Trigger()
 
 		if got == nil {
-			t.Fail()
-		}
-
-		if got.Error() != expected {
-			t.Errorf("expected an error message: %s, got: %s", expected, got.Error())
+			t.Errorf("expected an error: %v", got)
 		}
 	})
 
@@ -273,11 +268,7 @@ func TestWorkflowServerError(t *testing.T) {
 		got := w.TriggerContext(ctx)
 
 		if got == nil {
-			t.Fail()
-		}
-
-		if got.Error() != expected {
-			t.Errorf("expected an error message: %s, got: %s", expected, got.Error())
+			t.Errorf("expected an error: %v", got)
 		}
 	})
 }
