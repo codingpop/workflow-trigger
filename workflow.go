@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 // Workflow defines the trigger functions
@@ -15,6 +16,7 @@ type Workflow struct {
 	api         string
 	accessToken string
 	eventType   string
+	client      *http.Client
 }
 
 // Params collects repository credentials and workflow information
@@ -24,7 +26,8 @@ type Params struct {
 	Owner       string
 	AccessToken string
 	EventType   string
-	Retries     string
+	MaxRetries  int
+	Delay       time.Duration
 }
 
 // Configure creates an instance of Workflow
@@ -40,10 +43,29 @@ func Configure(p Params) *Workflow {
 		Path:   fmt.Sprintf("/repos/%s/%s/dispatches", p.Owner, p.Repo),
 	}
 
+	maxRetries := 1
+	if p.MaxRetries > 1 {
+		maxRetries = p.MaxRetries
+	}
+
+	delay := 5 * time.Second
+	if p.Delay.String() != "0s" {
+		delay = p.Delay
+	}
+
+	c := http.Client{
+		Transport: &retryRoundTripper{
+			next:       http.DefaultTransport,
+			maxRetries: maxRetries,
+			delay:      delay,
+		},
+	}
+
 	return &Workflow{
 		api:         u.String(),
 		accessToken: p.AccessToken,
 		eventType:   p.EventType,
+		client:      &c,
 	}
 }
 
@@ -66,7 +88,7 @@ func (w *Workflow) trigger(ctx context.Context) (retErr error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("token %s", w.accessToken))
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := w.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("unexpected error triggering workflow: %w", err)
 	}
@@ -82,6 +104,38 @@ func (w *Workflow) TriggerContext(ctx context.Context) error {
 // Trigger triggers a GitHub Action workflow
 func (w *Workflow) Trigger() error {
 	return w.TriggerContext(context.Background())
+}
+
+type retryRoundTripper struct {
+	next       http.RoundTripper
+	maxRetries int
+	delay      time.Duration // delay between each retry
+}
+
+func (rr retryRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
+	var attempts int
+
+	for {
+		resp, err := rr.next.RoundTrip(r)
+		attempts++
+
+		// max retries exceeded
+		if attempts == rr.maxRetries {
+			return resp, err
+		}
+
+		// good outcome
+		if err == nil && resp.StatusCode < http.StatusInternalServerError {
+			return resp, err
+		}
+
+		// delay and retry
+		select {
+		case <-r.Context().Done():
+			return resp, r.Context().Err()
+		case <-time.After(rr.delay):
+		}
+	}
 }
 
 func handleResponse(r *http.Response) (retErr error) {
