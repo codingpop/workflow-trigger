@@ -49,7 +49,7 @@ func Configure(p Params) *Workflow {
 	}
 
 	delay := 5 * time.Second
-	if p.Delay.String() != "0s" {
+	if p.Delay > 0*time.Second {
 		delay = p.Delay
 	}
 
