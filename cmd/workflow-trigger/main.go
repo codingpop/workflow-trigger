@@ -38,6 +38,9 @@ func main() {
 	w := workflow.Configure(p)
 
 	err := w.Trigger()
-
-	fmt.Println(err)
+	if err != nil {
+		fmt.Printf("Failed to trigger: %v\n", err)
+	} else {
+		fmt.Println("Trigger successful")
+	}
 }

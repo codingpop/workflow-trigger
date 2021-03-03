@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"time"
 )
 
 // Workflow defines the trigger functions
@@ -16,27 +15,28 @@ type Workflow struct {
 	api         string
 	accessToken string
 	eventType   string
-	client      *http.Client
 }
 
 // Params collects repository credentials and workflow information
 type Params struct {
+	BaseURL     string
 	Repo        string
 	Owner       string
 	AccessToken string
 	EventType   string
-	TimeOut     time.Duration
+	Retries     string
 }
 
 // Configure creates an instance of Workflow
 func Configure(p Params) *Workflow {
-	c := &http.Client{
-		Timeout: p.TimeOut,
+	host := "api.github.com"
+	if p.BaseURL != "" {
+		host = p.BaseURL
 	}
 
 	u := url.URL{
 		Scheme: "https",
-		Host:   "api.github.com",
+		Host:   host,
 		Path:   fmt.Sprintf("/repos/%s/%s/dispatches", p.Owner, p.Repo),
 	}
 
@@ -44,7 +44,6 @@ func Configure(p Params) *Workflow {
 		api:         u.String(),
 		accessToken: p.AccessToken,
 		eventType:   p.EventType,
-		client:      c,
 	}
 }
 
@@ -67,7 +66,7 @@ func (w *Workflow) trigger(ctx context.Context) (retErr error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", fmt.Sprintf("token %s", w.accessToken))
 
-	resp, err := w.client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("unexpected error triggering workflow: %w", err)
 	}
@@ -75,14 +74,14 @@ func (w *Workflow) trigger(ctx context.Context) (retErr error) {
 	return handleResponse(resp)
 }
 
-// Trigger triggers a GitHub Action workflow
-func (w *Workflow) Trigger() error {
-	return w.trigger(context.Background())
-}
-
 // TriggerContext accepts context.Context and triggers a GitHub Action workflow
 func (w *Workflow) TriggerContext(ctx context.Context) error {
 	return w.trigger(ctx)
+}
+
+// Trigger triggers a GitHub Action workflow
+func (w *Workflow) Trigger() error {
+	return w.TriggerContext(context.Background())
 }
 
 func handleResponse(r *http.Response) (retErr error) {
@@ -92,10 +91,6 @@ func handleResponse(r *http.Response) (retErr error) {
 		}
 	}()
 
-	var response struct {
-		Message string `json:"message"`
-	}
-
 	if r.StatusCode < http.StatusBadRequest {
 		return nil
 	}
@@ -104,10 +99,21 @@ func handleResponse(r *http.Response) (retErr error) {
 		return errors.New("server error")
 	}
 
-	err := json.NewDecoder(r.Body).Decode(&response)
-	if err != nil {
-		return fmt.Errorf("unexpected error parsing api response: %w", err)
+	switch r.StatusCode {
+	case http.StatusNoContent, http.StatusOK:
+		return nil
+	case http.StatusNotFound, http.StatusUnauthorized, http.StatusUnprocessableEntity, http.StatusInternalServerError:
+		var body struct {
+			Message string `json:"message"`
+		}
+
+		err := json.NewDecoder(r.Body).Decode(&body)
+		if err != nil {
+			return fmt.Errorf("unexpected error parsing api response: %w", err)
+		}
+
+		return errors.New(body.Message)
 	}
 
-	return errors.New(response.Message)
+	return nil
 }
