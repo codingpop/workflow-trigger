@@ -145,18 +145,10 @@ func handleResponse(r *http.Response) (retErr error) {
 		}
 	}()
 
-	if r.StatusCode < http.StatusBadRequest {
-		return nil
-	}
-
-	if r.StatusCode >= http.StatusInternalServerError {
-		return errors.New("server error")
-	}
-
 	switch r.StatusCode {
 	case http.StatusNoContent, http.StatusOK:
 		return nil
-	case http.StatusNotFound, http.StatusUnauthorized, http.StatusUnprocessableEntity, http.StatusInternalServerError:
+	case http.StatusNotFound, http.StatusBadRequest, http.StatusUnauthorized, http.StatusUnprocessableEntity, http.StatusInternalServerError:
 		var body struct {
 			Message string `json:"message"`
 		}
